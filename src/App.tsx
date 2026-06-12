@@ -219,8 +219,16 @@ const DEFAULT_FALLBACKS: Record<string, Record<string, string>> = {
     biotechPhaseDesc3: "حقن السائل الفطري داخل قوارير الحبوب تحت تيار هواء HEPA مستمر لنمو متناسق.",
     // Biology Core
     scienceBadge: "جوهر بيولوجيا الفطريات",
-    title: "ريادة التكنولوجيا الحيوية العضوية في شمال إفريقيا",
-    subtitle: "من المناطق الخصبة في تونس، نجمع بين التراث الزراعي المحلي والعلوم البيولوجية الحديثة.",
+    aboutCoreTitle: "ريادة التكنولوجيا الحيوية العضوية في شمال إفريقيا",
+    aboutCoreSubtitle: "من المناطق الخصبة في تونس، نجمع بين التراث الزراعي المحلي والعلوم البيولوجية الحديثة.",
+    "About us": "من نحن",
+    "Pioneering Organic Biotech in North Africa": "ريادة التكنولوجيا الحيوية العضوية في شمال إفريقيا",
+    "Dynamic mycelial propagation and bio-material design": "إكثار فطري ديناميكي وتصميم مواد حيوية",
+    "Born in the fertile regions of Tunisia, we bridge local agricultural heritage with state-of-the-art biological science.": "من المناطق الخصبة في تونس، نجمع بين التراث الزراعي المحلي والعلوم البيولوجية الحديثة.",
+    "Cultivating the Infinite Potential of Mycelium": "زراعة الإمكانات اللامتناهية للميسيليوم",
+    "Unlocking the Organic Power of Pure Mushroom Spawn": "إطلاق القوة العضوية للأبواغ الفطرية النقية",
+    "We upcycle Tunisian agricultural co-products—like olive husks and wheat grains—into premium mycelium spawn and compostable bio-materials. Empowering regional growers and driving the circular economy.": "نقوم بتثمين المنتجات الزراعية التونسية الثانوية مثل مخلفات الزيتون وحبوب القمح وتحويلها إلى أبواغ فطرية ممتازة ومواد حيوية قابلة للتحلل، لدعم المنتجين المحليين وتعزيز الاقتصاد الدائري.",
+    "Certified pure strain inoculants & eco-packaging substrates grown locally in Tunisia under elite aseptic standards.": "ملقحات سلالات نقية معتمدة وركائز تغليف بيئية منتجة محلياً في تونس وفق معايير تعقيم عالية.",
     storyHeading: "إعادة تدوير المنتجات الثانوية التونسية",
     story: "تأسست بيوتك أغرو بفضل فريق من المهندسين والحالمين من جميع أنحاء تونس بهدف تثمين المخلفات الفلاحية لإنتاج فطر متميز وكرتون فطري طبيعي بديل للبلاستيك.",
     teamFocus: "يتابع فريقنا من العلماء التونسيين إنتاج وتلقيح كل دفعة بدقة لضمان خلوها تماماً من أي نوع من الملوثات.",
@@ -277,8 +285,16 @@ const DEFAULT_FALLBACKS: Record<string, Record<string, string>> = {
     biotechPhaseDesc3: "Introduction du mycélium en milieu hautement stérile sous flux d'air purifié.",
     // Biology Core
     scienceBadge: "Notre Cœur Technologique",
-    title: "Pionnier des biotechnologies mycologiques en Afrique du Nord",
-    subtitle: "Né au cœur des terres fertiles de Tunisie, nous lisons savoir-faire local et excellence scientifique.",
+    aboutCoreTitle: "Pionnier des biotechnologies mycologiques en Afrique du Nord",
+    aboutCoreSubtitle: "Né au cœur des terres fertiles de Tunisie, nous lions savoir-faire local et excellence scientifique.",
+    "About us": "À propos de nous",
+    "Pioneering Organic Biotech in North Africa": "Pionnier des biotechnologies mycologiques en Afrique du Nord",
+    "Dynamic mycelial propagation and bio-material design": "Propagation mycélienne dynamique et conception de biomatériaux",
+    "Born in the fertile regions of Tunisia, we bridge local agricultural heritage with state-of-the-art biological science.": "Né au cœur des terres fertiles de Tunisie, nous lions savoir-faire local et excellence scientifique.",
+    "Cultivating the Infinite Potential of Mycelium": "Cultiver le potentiel infini du mycélium",
+    "Unlocking the Organic Power of Pure Mushroom Spawn": "Libérer la puissance organique du mycélium pur",
+    "We upcycle Tunisian agricultural co-products—like olive husks and wheat grains—into premium mycelium spawn and compostable bio-materials. Empowering regional growers and driving the circular economy.": "Nous valorisons les coproduits agricoles tunisiens, comme les résidus d’olive et les grains de blé, en mycélium de qualité supérieure et en biomatériaux compostables pour soutenir les producteurs régionaux et l’économie circulaire.",
+    "Certified pure strain inoculants & eco-packaging substrates grown locally in Tunisia under elite aseptic standards.": "Inoculants de souches pures certifiées et substrats d’éco-emballage produits localement en Tunisie selon des standards aseptiques élevés.",
     storyHeading: "Valorisation des ressources agricoles",
     story: "Biotech Agro a été fondée pour valoriser les coproduits et pailles de céréales locales grâce à notre savoir-faire en mycologie industrielle, créant des semences d'excellence et des biomatériaux.",
     teamFocus: "Notre équipe de docteurs et d'ingénieurs assure des contrôles de pureté rigoureux garantissant un mycélium d'une vitalité exceptionnelle.",
@@ -299,33 +315,27 @@ function getLocalizedValue(
   currentLanguage: string,
   fallbackDefault: string
 ): string {
+  const translations = currentLanguage !== "en" ? DEFAULT_FALLBACKS[currentLanguage] : undefined;
+  const genericKeys = new Set(["title", "subtitle", "description", "name", "label"]);
+
   if (!sectionObj) {
-    if (currentLanguage !== "en" && DEFAULT_FALLBACKS[currentLanguage]) {
-      if (DEFAULT_FALLBACKS[currentLanguage][key] !== undefined) {
-        return DEFAULT_FALLBACKS[currentLanguage][key];
-      }
-      if (DEFAULT_FALLBACKS[currentLanguage][fallbackDefault] !== undefined) {
-        return DEFAULT_FALLBACKS[currentLanguage][fallbackDefault];
-      }
+    if (translations) {
+      if (translations[fallbackDefault] !== undefined) return translations[fallbackDefault];
+      if (!genericKeys.has(key) && translations[key] !== undefined) return translations[key];
     }
     return fallbackDefault;
   }
+
   const langKey = `${key}_${currentLanguage}`;
   if (sectionObj[langKey] !== undefined && sectionObj[langKey] !== null && sectionObj[langKey] !== "") {
     return sectionObj[langKey];
   }
-  
-  if (currentLanguage !== "en" && DEFAULT_FALLBACKS[currentLanguage]) {
-    if (DEFAULT_FALLBACKS[currentLanguage][key] !== undefined) {
-      return DEFAULT_FALLBACKS[currentLanguage][key];
-    }
+
+  if (translations) {
     const rawVal = sectionObj[key] || "";
-    if (DEFAULT_FALLBACKS[currentLanguage][rawVal] !== undefined) {
-      return DEFAULT_FALLBACKS[currentLanguage][rawVal];
-    }
-    if (DEFAULT_FALLBACKS[currentLanguage][fallbackDefault] !== undefined) {
-      return DEFAULT_FALLBACKS[currentLanguage][fallbackDefault];
-    }
+    if (translations[rawVal] !== undefined) return translations[rawVal];
+    if (translations[fallbackDefault] !== undefined) return translations[fallbackDefault];
+    if (!genericKeys.has(key) && translations[key] !== undefined) return translations[key];
   }
 
   if (sectionObj[key] !== undefined && sectionObj[key] !== null && sectionObj[key] !== "") {
@@ -489,7 +499,7 @@ export default function App() {
 
   // Dynamically update the website favicon to match the logo
   useEffect(() => {
-    const faviconUrl = siteContent?.logoUrl || "/src/assets/images/biotech_agro_logo_1781085871729.png";
+    const faviconUrl = siteContent?.logoUrl || "/assets/images/biotech_agro_logo_1781085871729.png";
     let link: HTMLLinkElement | null = document.querySelector("link[rel~='icon']");
     if (!link) {
       link = document.createElement("link");
@@ -2566,10 +2576,10 @@ export default function App() {
                 <EditableImage
                   src={
                     currentLanguage === "fr"
-                      ? siteContent.about.frenchLabImage || "/src/assets/images/French.jpeg"
+                      ? siteContent.about.frenchLabImage || "/assets/images/French.jpeg"
                       : currentLanguage === "ar"
-                      ? siteContent.about.arabicLabImage || "/src/assets/images/Arabic.jpeg"
-                      : siteContent.about.englishLabImage || "/src/assets/images/English.jpeg"
+                      ? siteContent.about.arabicLabImage || "/assets/images/Arabic.jpeg"
+                      : siteContent.about.englishLabImage || "/assets/images/English.jpeg"
                   }
                   alt={`${currentLanguage} illustration`}
                   onSave={(newImg) => {

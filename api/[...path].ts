@@ -4,46 +4,74 @@ import express from "express";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
-import { fileURLToPath } from "url";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import nodemailer from "nodemailer";
-
-const safeFilename = (typeof import.meta !== "undefined" && import.meta && import.meta.url)
-  ? fileURLToPath(import.meta.url)
-  : (typeof __filename !== "undefined" ? __filename : "");
-
-const safeDirname = safeFilename 
-  ? path.dirname(safeFilename) 
-  : (typeof __dirname !== "undefined" ? __dirname : process.cwd());
+import defaultDbSeed from "./seed-db";
 
 const app = express();
-const PORT = 3000;
-
 // Middleware to parse huge JSON bodies (for user base64 photo uploads up to 20MB)
 app.use(express.json({ limit: "20mb" }));
 
 // Resolve paths
-const DB_PATH = path.join(process.cwd(), "src", "db", "db.json");
+// Vercel Functions cannot persist writes inside the deployed source tree.
+// We seed a writable temporary JSON DB from src/db/db.json so public pages load correctly on Vercel.
+// For permanent admin edits/uploads, connect this later to Vercel Blob/Supabase.
+const SOURCE_DB_PATH = path.join(process.cwd(), "src", "db", "db.json");
+const WRITABLE_DB_PATH = process.env.VERCEL ? "/tmp/biotechagro-db.json" : SOURCE_DB_PATH;
 const SESSION_SECRET = process.env.SESSION_SECRET || "mycotunisia_secret_session_2026";
+
+function cleanEnvString(value?: string): string {
+  if (!value) return "";
+  return value.replace(/^["']|["']$/g, "").trim();
+}
+
+function cloneDefaultDBState() {
+  return JSON.parse(JSON.stringify(defaultDbSeed));
+}
+
+function getAdminEmail(db?: any): string {
+  return cleanEnvString(process.env.ADMIN_EMAIL) || db?.adminSettings?.adminEmail || "biotechagro.digital@gmail.com";
+}
+
+function ensureWritableDB() {
+  try {
+    if (fs.existsSync(WRITABLE_DB_PATH)) return;
+
+    fs.mkdirSync(path.dirname(WRITABLE_DB_PATH), { recursive: true });
+
+    if (fs.existsSync(SOURCE_DB_PATH)) {
+      fs.copyFileSync(SOURCE_DB_PATH, WRITABLE_DB_PATH);
+      return;
+    }
+
+    fs.writeFileSync(WRITABLE_DB_PATH, JSON.stringify(cloneDefaultDBState(), null, 2), "utf-8");
+  } catch (error) {
+    console.error("Failed to initialize writable JSON DB:", error);
+  }
+}
 
 // Helpers to read and write database
 function getDBState() {
   try {
-    if (fs.existsSync(DB_PATH)) {
-      const crude = fs.readFileSync(DB_PATH, "utf-8");
+    ensureWritableDB();
+    const dbPath = fs.existsSync(WRITABLE_DB_PATH) ? WRITABLE_DB_PATH : SOURCE_DB_PATH;
+    if (fs.existsSync(dbPath)) {
+      const crude = fs.readFileSync(dbPath, "utf-8");
       return JSON.parse(crude);
     }
   } catch (error) {
     console.error("Failed to read JSON DB:", error);
   }
-  return null;
+
+  // Important for Vercel: if the JSON file is not bundled into the serverless function,
+  // keep the API usable by falling back to an embedded seed copy.
+  return cloneDefaultDBState();
 }
 
 function saveDBState(data: any) {
   try {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-    fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2), "utf-8");
+    fs.mkdirSync(path.dirname(WRITABLE_DB_PATH), { recursive: true });
+    fs.writeFileSync(WRITABLE_DB_PATH, JSON.stringify(data, null, 2), "utf-8");
     return true;
   } catch (error) {
     console.error("Failed to write to JSON DB:", error);
@@ -348,7 +376,7 @@ app.post("/api/messages", async (req, res) => {
 
   // Retrieve same destination email address used for administrative actions
   const adminSettings = db.adminSettings || {};
-  const adminEmail = adminSettings.adminEmail || "biotechagro.digital@gmail.com";
+  const adminEmail = getAdminEmail(db);
 
   // Stylized simulated or live console delivery card
   console.log(`\n=============================================================`);
@@ -379,29 +407,47 @@ app.post("/api/auth/login", (req, res) => {
     return res.status(400).json({ error: "Missing login details." });
   }
 
+  const normalizedUsername = String(username).trim().toLowerCase();
+  const expectedUsername = (cleanEnvString(process.env.ADMIN_USERNAME) || "admin").toLowerCase();
+
+  if (normalizedUsername !== expectedUsername) {
+    return res.status(401).json({ error: "Incorrect administrator login credentials." });
+  }
+
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
 
-  const adminSettings = db.adminSettings;
-  if (!adminSettings) {
-    return res.status(500).json({ error: "Admin configuration state missing." });
-  }
+  db.adminSettings = db.adminSettings || {
+    adminEmail: getAdminEmail(db),
+    isDefaultPassword: true,
+    resetCode: null,
+  };
 
+  const adminSettings = db.adminSettings;
   let isMatch = false;
 
-  // Defensive fallback helper to enable instant logins (only if default password is not overridden)
-  const isDefaultActive = adminSettings.isDefaultPassword !== false;
-  if (isDefaultActive && (password === "admin" || password === "mycoadmin" || password === "admin123")) {
+  // Recommended production option: set ADMIN_PASSWORD in Vercel Environment Variables.
+  // This lets you recover access even if the temporary JSON DB/password state is reset.
+  const envAdminPassword = cleanEnvString(process.env.ADMIN_PASSWORD);
+  if (envAdminPassword && String(password) === envAdminPassword) {
     isMatch = true;
-  } else {
+  }
+
+  // Defensive default fallback for first deployment/reset.
+  const isDefaultActive = adminSettings.isDefaultPassword !== false;
+  if (!isMatch && isDefaultActive && (password === "admin" || password === "mycoadmin" || password === "admin123")) {
+    isMatch = true;
+  }
+
+  // Custom password stored in the JSON DB.
+  if (!isMatch && adminSettings.passwordHash) {
     const salt = adminSettings.passwordSalt || "myco_tunisia_salt_2026";
-    const hash = crypto.createHmac("sha256", salt).update(password).digest("hex");
+    const hash = crypto.createHmac("sha256", salt).update(String(password)).digest("hex");
     isMatch = hash === adminSettings.passwordHash;
   }
 
-  if (username.toLowerCase() === "admin" && isMatch) {
+  if (isMatch) {
     const token = generateSessionToken("admin");
-    // Securely record login timestamp
     db.adminSettings.lastLogin = new Date().toISOString();
     saveDBState(db);
 
@@ -422,7 +468,7 @@ app.post("/api/auth/request-reset", async (req, res) => {
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
 
   const adminSettings = db.adminSettings || {};
-  const adminEmail = adminSettings.adminEmail || "biotechagro.digital@gmail.com";
+  const adminEmail = getAdminEmail(db);
 
   if (email.trim().toLowerCase() !== adminEmail.toLowerCase()) {
     return res.status(400).json({ error: "The provided email does not match our administrator registry." });
@@ -465,16 +511,27 @@ app.post("/api/auth/request-reset", async (req, res) => {
       realSent: true,
     });
   } else if (mailResult.error) {
-    // If SMTP is configured but failed to deliver, return descriptive error so they can debug credentials
-    return res.status(500).json({
-      error: `Failed to dispatch secure email over SMTP gateway (${process.env.SMTP_HOST || "smtp.gmail.com"}). Reason: ${mailResult.error}. Please double-check your SMTP login, port, and security credentials.`
+    const allowScreenFallback = process.env.RESET_CODE_SCREEN_FALLBACK !== "false";
+
+    if (!allowScreenFallback) {
+      return res.status(500).json({
+        error: `Failed to dispatch secure email over SMTP gateway (${process.env.SMTP_HOST || "smtp.gmail.com"}). Reason: ${mailResult.error}. Please double-check your SMTP login, port, and security credentials.`
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: `SMTP delivery failed, so a temporary on-screen recovery code was generated. Configure SMTP variables in Vercel for real email delivery.`,
+      simulatedCode: code,
+      realSent: false,
+      warning: mailResult.error,
     });
   }
 
   // Otherwise, fallback to Simulated Sandbox representation
   res.json({
     success: true,
-    message: `A security code has been sent to ${adminEmail} (Simulated Sandbox)`,
+    message: `A security code has been generated for ${adminEmail}. SMTP is not configured, so use the temporary on-screen code below.`,
     simulatedCode: code, // returned so they can easily reset/test it in the client preview environment
     realSent: false,
   });
@@ -494,7 +551,7 @@ app.post("/api/auth/reset-password", (req, res) => {
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
 
   const adminSettings = db.adminSettings || {};
-  const adminEmail = adminSettings.adminEmail || "biotechagro.digital@gmail.com";
+  const adminEmail = getAdminEmail(db);
 
   if (email.trim().toLowerCase() !== adminEmail.toLowerCase()) {
     return res.status(400).json({ error: "Provided email address mismatch." });
@@ -541,7 +598,7 @@ app.get("/api/auth/settings", requireAdmin, (req, res) => {
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
   const settings = db.adminSettings || {};
   res.json({
-    adminEmail: settings.adminEmail || "biotechagro.digital@gmail.com",
+    adminEmail: getAdminEmail(db),
     isDefaultPassword: settings.isDefaultPassword !== false,
     lastLogin: settings.lastLogin || ""
   });
@@ -863,30 +920,4 @@ Fulfill their request in a highly academic yet commercially appealing and access
   });
 });
 
-// ==========================================
-// VITE CLIENT INTEGRATION MIDDLEWARE
-// ==========================================
-async function startServer() {
-  // Support dynamic asset loading (for logo and user assets) in both development and production
-  app.use("/src/assets", express.static(path.join(process.cwd(), "src/assets")));
-
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
-  }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server successfully started at http://localhost:${PORT}`);
-  });
-}
-
-startServer();
+export default app;
