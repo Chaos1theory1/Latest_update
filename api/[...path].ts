@@ -100,46 +100,65 @@ function getGeminiClient() {
 }
 
 // SMTP Transporter initialization and validation helpers
-function getMailTransporter() {
-  const cleanEnvStr = (val?: string): string => {
-    if (!val) return "";
-    return val.replace(/^["']|["']$/g, "").trim();
+function getSmtpConfig() {
+  const host = cleanEnvString(process.env.SMTP_HOST || "smtp.gmail.com") || "smtp.gmail.com";
+  const port = parseInt(cleanEnvString(process.env.SMTP_PORT || "587"), 10) || 587;
+  const user = cleanEnvString(process.env.SMTP_USER);
+  let pass = cleanEnvString(process.env.SMTP_PASS);
+  const isGmail = host.toLowerCase().includes("smtp.gmail.com") || host.toLowerCase() === "gmail";
+
+  // Google displays app passwords in groups. If the pasted value contains spaces,
+  // remove them before using it with Nodemailer/Gmail SMTP.
+  if (isGmail) {
+    pass = pass.replace(/\s+/g, "");
+  }
+
+  return {
+    host,
+    port,
+    user,
+    pass,
+    isGmail,
+    configured: Boolean(user && pass && !pass.includes("YOUR_SECURE")),
   };
+}
 
-  const host = cleanEnvStr(process.env.SMTP_HOST || "smtp.gmail.com");
-  const portStr = cleanEnvStr(process.env.SMTP_PORT || "587");
-  const port = parseInt(portStr, 10);
-  const user = cleanEnvStr(process.env.SMTP_USER);
-  const pass = cleanEnvStr(process.env.SMTP_PASS);
+function maskEmail(email: string) {
+  const [name, domain] = email.split("@");
+  if (!name || !domain) return email ? "configured" : "not configured";
+  return `${name.slice(0, 2)}***@${domain}`;
+}
 
-  console.log(`[SMTP Debug] Initializing transporter - Host: "${host}", Port: ${port}, User: "${user}", PassLength: ${pass ? pass.length : 0}, PassFirstLast: ${pass ? pass[0] + "..." + pass[pass.length - 1] : "none"}`);
+function getMailTransporter() {
+  const smtp = getSmtpConfig();
+
+  console.log(`[SMTP Debug] Host: "${smtp.host}", Port: ${smtp.port}, User: "${maskEmail(smtp.user)}", PassLength: ${smtp.pass ? smtp.pass.length : 0}, Gmail: ${smtp.isGmail}`);
 
   // Check if SMTP is configured (non-empty and not the default placeholder)
-  if (!user || !pass || pass === "" || pass.includes("YOUR_SECURE")) {
+  if (!smtp.configured) {
     return null;
   }
 
-  // If using Gmail, using the standard service configuration is highly recommended for security and port compliance
-  if (host.toLowerCase().includes("smtp.gmail.com") || host.toLowerCase() === "gmail") {
+  // Gmail works best with the service helper and a Google App Password.
+  if (smtp.isGmail) {
     return nodemailer.createTransport({
       service: "gmail",
       auth: {
-        user,
-        pass,
+        user: smtp.user,
+        pass: smtp.pass,
       },
     });
   }
 
   return nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
+    host: smtp.host,
+    port: smtp.port,
+    secure: smtp.port === 465,
     auth: {
-      user,
-      pass,
+      user: smtp.user,
+      pass: smtp.pass,
     },
     tls: {
-      // Allow self-signed or TLS handshakes comfortably
       rejectUnauthorized: false
     }
   });
@@ -320,6 +339,29 @@ function verifySessionToken(token?: string): boolean {
   }
 }
 
+function generateResetToken(email: string, code: string, expiresAt: number): string {
+  const normalizedEmail = email.trim().toLowerCase();
+  const hmacInput = `${normalizedEmail}:${code}:${expiresAt}`;
+  const digest = crypto.createHmac("sha256", SESSION_SECRET).update(hmacInput).digest("hex");
+  return `${expiresAt}:${digest}`;
+}
+
+function verifyResetToken(email: string, code: string, resetToken?: string): boolean {
+  if (!resetToken) return false;
+  const parts = resetToken.split(":");
+  if (parts.length !== 2) return false;
+  const [expiresStr, digest] = parts;
+  const expiresAt = parseInt(expiresStr, 10);
+  if (isNaN(expiresAt) || expiresAt < Date.now()) return false;
+
+  const expected = generateResetToken(email, code, expiresAt).split(":")[1];
+  try {
+    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(expected));
+  } catch (err) {
+    return false;
+  }
+}
+
 // Middleware to secure administrator endpoints
 function requireAdmin(req: express.Request, res: express.Response, next: express.NextFunction) {
   const authHeader = req.headers.authorization;
@@ -337,6 +379,38 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
 // ==========================================
 // PUBLIC ENDPOINTS
 // ==========================================
+
+// Safe diagnostic endpoint. It does not expose passwords or secret values.
+// Use this on Vercel to confirm that API routes, admin env vars, and SMTP env vars are visible.
+app.get("/api/health", (req, res) => {
+  const db = getDBState();
+  const smtp = getSmtpConfig();
+  res.json({
+    ok: true,
+    runtime: process.env.VERCEL ? "vercel" : "local",
+    database: {
+      sourceDbExists: fs.existsSync(SOURCE_DB_PATH),
+      writableDbPath: process.env.VERCEL ? "/tmp/biotechagro-db.json" : "src/db/db.json",
+      hasSiteContent: Boolean(db?.siteContent),
+      productCount: db?.products?.length || 0,
+      serviceCount: db?.services?.length || 0,
+    },
+    admin: {
+      username: cleanEnvString(process.env.ADMIN_USERNAME) || "admin",
+      adminEmail: maskEmail(getAdminEmail(db)),
+      hasAdminPasswordEnv: Boolean(cleanEnvString(process.env.ADMIN_PASSWORD)),
+      resetScreenFallbackEnabled: process.env.RESET_CODE_SCREEN_FALLBACK !== "false",
+    },
+    smtp: {
+      host: smtp.host,
+      port: smtp.port,
+      user: maskEmail(smtp.user),
+      configured: smtp.configured,
+      isGmail: smtp.isGmail,
+      passLength: smtp.pass ? smtp.pass.length : 0,
+    },
+  });
+});
 
 // Get entire site datasets
 app.get("/api/content", (req, res) => {
@@ -408,14 +482,17 @@ app.post("/api/auth/login", (req, res) => {
   }
 
   const normalizedUsername = String(username).trim().toLowerCase();
-  const expectedUsername = (cleanEnvString(process.env.ADMIN_USERNAME) || "admin").toLowerCase();
-
-  if (normalizedUsername !== expectedUsername) {
-    return res.status(401).json({ error: "Incorrect administrator login credentials." });
-  }
 
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
+
+  const adminEmail = getAdminEmail(db).toLowerCase();
+  const expectedUsername = (cleanEnvString(process.env.ADMIN_USERNAME) || "admin").toLowerCase();
+  const acceptedUsernames = new Set([expectedUsername, "admin", adminEmail].filter(Boolean));
+
+  if (!acceptedUsernames.has(normalizedUsername)) {
+    return res.status(401).json({ error: "Incorrect administrator login credentials." });
+  }
 
   db.adminSettings = db.adminSettings || {
     adminEmail: getAdminEmail(db),
@@ -457,7 +534,10 @@ app.post("/api/auth/login", (req, res) => {
   }
 });
 
-// Request a password reset code sent to the registered email
+// Request a password reset code sent to the registered email.
+// Important for Vercel: this is stateless. The verification token is signed
+// and returned to the browser, so reset-password can still verify the code
+// even if Vercel sends the second request to a different serverless instance.
 app.post("/api/auth/request-reset", async (req, res) => {
   const { email } = req.body;
   if (!email) {
@@ -467,79 +547,72 @@ app.post("/api/auth/request-reset", async (req, res) => {
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
 
-  const adminSettings = db.adminSettings || {};
   const adminEmail = getAdminEmail(db);
+  const normalizedEmail = String(email).trim().toLowerCase();
 
-  if (email.trim().toLowerCase() !== adminEmail.toLowerCase()) {
-    return res.status(400).json({ error: "The provided email does not match our administrator registry." });
+  if (normalizedEmail !== adminEmail.toLowerCase()) {
+    return res.status(400).json({
+      error: `The provided email does not match the administrator registry. Use the ADMIN_EMAIL configured in Vercel: ${maskEmail(adminEmail)}.`
+    });
   }
 
-  // Generate a random 6-digit verification code
   const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const expiresAt = Date.now() + 10 * 60 * 1000; // valid for 10 minutes
+  const expiresAt = Date.now() + 10 * 60 * 1000;
+  const resetToken = generateResetToken(adminEmail, code, expiresAt);
 
+  // Keep a temporary copy for local development/older UI flows, but do not depend on it on Vercel.
   db.adminSettings = {
     ...db.adminSettings,
     adminEmail,
-    resetCode: {
-      code,
-      expiresAt,
-    }
+    resetCode: { code, expiresAt },
   };
-
   saveDBState(db);
 
-  // Print highly stylized mock email delivery card to the console logs
-  console.log(`\n=============================================================`);
+  console.log(`
+=============================================================`);
   console.log(`✉️  SECURE EMAIL DELIVERY SYSTEM (Biotech Agro Laboratory)`);
   console.log(`-------------------------------------------------------------`);
   console.log(`To:       ${adminEmail}`);
   console.log(`Subject:  Lab Administrative Code Verification Reset`);
   console.log(`Code:     ${code}`);
-  console.log(`Alert:    This code is valid for 10 minutes. Please enter`);
-  console.log(`          it on the security console to reset the password.`);
-  console.log(`=============================================================\n`);
+  console.log(`Alert:    This code is valid for 10 minutes.`);
+  console.log(`=============================================================
+`);
 
-  // Attempt real SMTP execution if configured
   const mailResult = await sendResetCodeEmail(adminEmail, code);
 
   if (mailResult.realSent) {
-    // If sent via real SMTP, do not expose simulatedCode in client response for highest production security!
     return res.json({
       success: true,
-      message: `A secure verification code has been dispatched to ${adminEmail} via Biotech-Agro Mail routing.`,
+      message: `A secure verification code has been dispatched to ${adminEmail}.`,
       realSent: true,
-    });
-  } else if (mailResult.error) {
-    const allowScreenFallback = process.env.RESET_CODE_SCREEN_FALLBACK !== "false";
-
-    if (!allowScreenFallback) {
-      return res.status(500).json({
-        error: `Failed to dispatch secure email over SMTP gateway (${process.env.SMTP_HOST || "smtp.gmail.com"}). Reason: ${mailResult.error}. Please double-check your SMTP login, port, and security credentials.`
-      });
-    }
-
-    return res.json({
-      success: true,
-      message: `SMTP delivery failed, so a temporary on-screen recovery code was generated. Configure SMTP variables in Vercel for real email delivery.`,
-      simulatedCode: code,
-      realSent: false,
-      warning: mailResult.error,
+      resetToken,
     });
   }
 
-  // Otherwise, fallback to Simulated Sandbox representation
-  res.json({
+  const allowScreenFallback = process.env.RESET_CODE_SCREEN_FALLBACK !== "false";
+
+  if (mailResult.error && !allowScreenFallback) {
+    return res.status(500).json({
+      error: `Failed to dispatch secure email over SMTP gateway (${process.env.SMTP_HOST || "smtp.gmail.com"}). Reason: ${mailResult.error}. Please double-check SMTP_USER, SMTP_PASS, SMTP_HOST and SMTP_PORT in Vercel.`
+    });
+  }
+
+  return res.json({
     success: true,
-    message: `A security code has been generated for ${adminEmail}. SMTP is not configured, so use the temporary on-screen code below.`,
-    simulatedCode: code, // returned so they can easily reset/test it in the client preview environment
+    message: mailResult.error
+      ? "SMTP delivery failed, so a temporary on-screen recovery code was generated. Configure SMTP variables in Vercel for real email delivery."
+      : `SMTP is not configured, so use the temporary on-screen code below for testing.`,
+    simulatedCode: code,
+    resetToken,
     realSent: false,
+    warning: mailResult.error,
   });
 });
 
 // Reset password with a valid reset code
 app.post("/api/auth/reset-password", (req, res) => {
-  const { email, code, newPassword } = req.body;
+  const { email, code, newPassword, resetToken } = req.body;
   if (!email || !code || !newPassword) {
     return res.status(400).json({ error: "Missing email, code, or new password." });
   }
@@ -558,8 +631,11 @@ app.post("/api/auth/reset-password", (req, res) => {
   }
 
   const resetInfo = adminSettings.resetCode;
-  if (!resetInfo || resetInfo.code !== code.trim() || Date.now() > resetInfo.expiresAt) {
-    return res.status(400).json({ error: "Invalid, expired, or missing verification reset code." });
+  const signedTokenValid = verifyResetToken(adminEmail, String(code).trim(), resetToken);
+  const temporaryDbCodeValid = Boolean(resetInfo && resetInfo.code === String(code).trim() && Date.now() <= resetInfo.expiresAt);
+
+  if (!signedTokenValid && !temporaryDbCodeValid) {
+    return res.status(400).json({ error: "Invalid or expired verification reset code. Request a new code and try again." });
   }
 
   // Update password hashes

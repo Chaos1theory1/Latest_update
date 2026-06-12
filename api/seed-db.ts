@@ -166,6 +166,16 @@ const defaultDbSeed = {
   ],
   "messages": [
     {
+      "id": "msg_1781275866279",
+      "senderName": "wssqsq",
+      "senderEmail": "qsqqs@gmail.com",
+      "senderPhone": "",
+      "subject": "vvvv",
+      "message": "vv",
+      "isRead": false,
+      "receivedAt": "2026-06-12T14:51:06.279Z"
+    },
+    {
       "id": "msg_1781086820716",
       "senderName": "tester",
       "senderEmail": "tester@gmail.com",
@@ -198,10 +208,10 @@ const defaultDbSeed = {
   ],
   "adminSettings": {
     "adminEmail": "biotechagro.digital@gmail.com",
-    "passwordSalt": "",
-    "passwordHash": "",
-    "isDefaultPassword": true,
-    "lastLogin": "",
+    "passwordSalt": "8f45f7adcd3637b6d84764e635f7f8e9",
+    "passwordHash": "8fb4837ee20ea17b83c809bff9213008918677a146dbb33447e8a575169fe0e1",
+    "isDefaultPassword": false,
+    "lastLogin": "2026-06-12T15:31:54.580Z",
     "resetCode": null
   }
 } as const;

@@ -42,6 +42,9 @@ import Footer from "./components/Footer";
 import GoogleDriveVault from "./components/GoogleDriveVault";
 import { Product, Service, ContactMessage, SiteContent, DatabaseState, ProductCategory, ProductStatus, TeamMember, Certification, FeatureItem, CatalogSection } from "./types";
 import { i18n } from "./translations";
+import fallbackDb from "./db/db.json";
+
+const fallbackData = fallbackDb as DatabaseState;
 
 // Floating-overlay or in-place inline text editor for admin live editing
 function EditableText({
@@ -492,9 +495,9 @@ export default function App() {
   }, [selectedQrProduct]);
 
   // Site general data states
-  const [products, setProducts] = useState<Product[]>([]);
-  const [services, setServices] = useState<Service[]>([]);
-  const [siteContent, setSiteContent] = useState<SiteContent | null>(null);
+  const [products, setProducts] = useState<Product[]>(fallbackData.products || []);
+  const [services, setServices] = useState<Service[]>(fallbackData.services || []);
+  const [siteContent, setSiteContent] = useState<SiteContent | null>(fallbackData.siteContent || null);
   const [isLoadingContent, setIsLoadingContent] = useState<boolean>(true);
 
   // Dynamically update the website favicon to match the logo
@@ -556,6 +559,7 @@ export default function App() {
   const [resetMessage, setResetMessage] = useState<string>("");
   const [resetError, setResetError] = useState<string>("");
   const [simulatedCode, setSimulatedCode] = useState<string>("");
+  const [resetToken, setResetToken] = useState<string>("");
 
   // Active admin security settings retrieved from server
   const [adminSecEmail, setAdminSecEmail] = useState<string>("");
@@ -620,24 +624,38 @@ export default function App() {
     setIsLoadingContent(true);
     try {
       const response = await fetch("/api/content");
-      if (response.ok) {
-        const data = await response.json();
-        setProducts(data.products || []);
-        setServices(data.services || []);
-        if (data.siteContent) {
-          setSiteContent(data.siteContent);
-          // populate editorial copy edit inputs
-          setEditHero(data.siteContent.hero);
-          setEditAbout(data.siteContent.about);
-          setEditContactDetails(data.siteContent.contactDetails);
-          setLogoUrlInput(data.siteContent.logoUrl || "");
-          if (data.siteContent.footer) {
-            setEditFooter(data.siteContent.footer);
-          }
+      if (!response.ok) {
+        throw new Error(`Content API returned ${response.status}`);
+      }
+
+      const data = await response.json();
+      setProducts(data.products || fallbackData.products || []);
+      setServices(data.services || fallbackData.services || []);
+      if (data.siteContent) {
+        setSiteContent(data.siteContent);
+        // populate editorial copy edit inputs
+        setEditHero(data.siteContent.hero);
+        setEditAbout(data.siteContent.about);
+        setEditContactDetails(data.siteContent.contactDetails);
+        setLogoUrlInput(data.siteContent.logoUrl || "");
+        if (data.siteContent.footer) {
+          setEditFooter(data.siteContent.footer);
         }
       }
     } catch (err) {
-      console.error("Failed to load content:", err);
+      console.error("Failed to load content from API; using bundled fallback data:", err);
+      setProducts(fallbackData.products || []);
+      setServices(fallbackData.services || []);
+      if (fallbackData.siteContent) {
+        setSiteContent(fallbackData.siteContent);
+        setEditHero(fallbackData.siteContent.hero);
+        setEditAbout(fallbackData.siteContent.about);
+        setEditContactDetails(fallbackData.siteContent.contactDetails);
+        setLogoUrlInput(fallbackData.siteContent.logoUrl || "");
+        if (fallbackData.siteContent.footer) {
+          setEditFooter(fallbackData.siteContent.footer);
+        }
+      }
     } finally {
       setIsLoadingContent(false);
     }
@@ -874,6 +892,8 @@ export default function App() {
     setIsRequestingResetCode(true);
     setResetMessage("");
     setResetError("");
+    setSimulatedCode("");
+    setResetToken("");
 
     try {
       const response = await fetch("/api/auth/request-reset", {
@@ -885,6 +905,9 @@ export default function App() {
       if (response.ok) {
         setResetCodeSent(true);
         setResetMessage(data.message);
+        if (data.resetToken) {
+          setResetToken(data.resetToken);
+        }
         if (data.simulatedCode) {
           setSimulatedCode(data.simulatedCode);
         }
@@ -912,7 +935,8 @@ export default function App() {
         body: JSON.stringify({
           email: resetEmail.trim(),
           code: resetCode.trim(),
-          newPassword: resetNewPassword.trim()
+          newPassword: resetNewPassword.trim(),
+          resetToken
         })
       });
       const data = await response.json();
@@ -921,6 +945,7 @@ export default function App() {
         setResetCode("");
         setResetNewPassword("");
         setSimulatedCode("");
+        setResetToken("");
         setTimeout(() => {
           setShowForgotPassword(false);
           setResetCodeSent(false);
@@ -3647,7 +3672,9 @@ export default function App() {
                           type="button"
                           onClick={() => {
                             setShowForgotPassword(true);
-                            setResetEmail("biotechagro.digital@gmail.com");
+                            setResetEmail(adminSecEmail || "biotechagro.digital@gmail.com");
+                            setResetToken("");
+                            setSimulatedCode("");
                           }}
                           className="w-full text-center text-xs text-emerald-800 hover:text-emerald-900 hover:underline font-medium transition-all"
                         >
