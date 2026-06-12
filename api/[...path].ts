@@ -382,7 +382,7 @@ function requireAdmin(req: express.Request, res: express.Response, next: express
 
 // Safe diagnostic endpoint. It does not expose passwords or secret values.
 // Use this on Vercel to confirm that API routes, admin env vars, and SMTP env vars are visible.
-app.get("/api/health", (req, res) => {
+app.get(["/api/health", "/health"], (req, res) => {
   const db = getDBState();
   const smtp = getSmtpConfig();
   res.json({
@@ -413,7 +413,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // Get entire site datasets
-app.get("/api/content", (req, res) => {
+app.get(["/api/content", "/content"], (req, res) => {
   const db = getDBState();
   if (!db) {
     return res.status(500).json({ error: "Unable to read database datasets." });
@@ -424,7 +424,7 @@ app.get("/api/content", (req, res) => {
 });
 
 // Post a contact inquiry message
-app.post("/api/messages", async (req, res) => {
+app.post(["/api/messages", "/messages"], async (req, res) => {
   const { senderName, senderEmail, senderPhone, subject, message } = req.body;
   if (!senderName || !senderEmail || !subject || !message) {
     return res.status(400).json({ error: "Required contact form parameters are missing." });
@@ -475,7 +475,7 @@ app.post("/api/messages", async (req, res) => {
 });
 
 // Authentication log in
-app.post("/api/auth/login", (req, res) => {
+app.post(["/api/auth/login", "/auth/login"], (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) {
     return res.status(400).json({ error: "Missing login details." });
@@ -538,7 +538,7 @@ app.post("/api/auth/login", (req, res) => {
 // Important for Vercel: this is stateless. The verification token is signed
 // and returned to the browser, so reset-password can still verify the code
 // even if Vercel sends the second request to a different serverless instance.
-app.post("/api/auth/request-reset", async (req, res) => {
+app.post(["/api/auth/request-reset", "/auth/request-reset"], async (req, res) => {
   const { email } = req.body;
   if (!email) {
     return res.status(400).json({ error: "Email address is required." });
@@ -611,7 +611,7 @@ app.post("/api/auth/request-reset", async (req, res) => {
 });
 
 // Reset password with a valid reset code
-app.post("/api/auth/reset-password", (req, res) => {
+app.post(["/api/auth/reset-password", "/auth/reset-password"], (req, res) => {
   const { email, code, newPassword, resetToken } = req.body;
   if (!email || !code || !newPassword) {
     return res.status(400).json({ error: "Missing email, code, or new password." });
@@ -659,17 +659,30 @@ app.post("/api/auth/reset-password", (req, res) => {
   });
 });
 
+
+// AUTH_ENDPOINT_DIAGNOSTICS
+// These GET handlers make browser address-bar tests easier. Real admin/login/reset actions use POST.
+app.get(["/api/auth/login", "/auth/login"], (req, res) => {
+  res.status(405).json({ ok: false, error: "Use POST /api/auth/login with JSON { username, password }.", method: req.method, path: req.path });
+});
+app.get(["/api/auth/request-reset", "/auth/request-reset"], (req, res) => {
+  res.status(405).json({ ok: false, error: "Use POST /api/auth/request-reset with JSON { email }.", method: req.method, path: req.path });
+});
+app.get(["/api/auth/reset-password", "/auth/reset-password"], (req, res) => {
+  res.status(405).json({ ok: false, error: "Use POST /api/auth/reset-password with JSON { email, code, newPassword, resetToken }.", method: req.method, path: req.path });
+});
+
 // ==========================================
 // PROTECTED SECURE ADMIN ENDPOINTS
 // ==========================================
 
 // Validate current token
-app.get("/api/auth/verify", requireAdmin, (req, res) => {
+app.get(["/api/auth/verify", "/auth/verify"], requireAdmin, (req, res) => {
   res.json({ success: true, username: "admin" });
 });
 
 // Get current secure admin details
-app.get("/api/auth/settings", requireAdmin, (req, res) => {
+app.get(["/api/auth/settings", "/auth/settings"], requireAdmin, (req, res) => {
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
   const settings = db.adminSettings || {};
@@ -681,7 +694,7 @@ app.get("/api/auth/settings", requireAdmin, (req, res) => {
 });
 
 // Update Admin Registered Security Email
-app.put("/api/auth/update-email", requireAdmin, (req, res) => {
+app.put(["/api/auth/update-email", "/auth/update-email"], requireAdmin, (req, res) => {
   const { email } = req.body;
   if (!email || !email.includes("@")) {
     return res.status(400).json({ error: "A valid email is required." });
@@ -698,7 +711,7 @@ app.put("/api/auth/update-email", requireAdmin, (req, res) => {
 });
 
 // Update Admin Password
-app.put("/api/auth/update-password", requireAdmin, (req, res) => {
+app.put(["/api/auth/update-password", "/auth/update-password"], requireAdmin, (req, res) => {
   const { newPassword } = req.body;
   if (!newPassword || newPassword.trim().length < 4) {
     return res.status(400).json({ error: "Password must be at least 4 characters long." });
@@ -723,7 +736,7 @@ app.put("/api/auth/update-password", requireAdmin, (req, res) => {
 });
 
 // Update text copy sections
-app.put("/api/content/text", requireAdmin, (req, res) => {
+app.put(["/api/content/text", "/content/text"], requireAdmin, (req, res) => {
   const { section, data } = req.body;
   if (!section || !data) {
     return res.status(400).json({ error: "Section identifier or data values missing." });
@@ -761,7 +774,7 @@ app.put("/api/content/text", requireAdmin, (req, res) => {
 });
 
 // Add a product catalog item
-app.post("/api/products", requireAdmin, (req, res) => {
+app.post(["/api/products", "/products"], requireAdmin, (req, res) => {
   const productData = req.body;
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
@@ -789,7 +802,7 @@ app.post("/api/products", requireAdmin, (req, res) => {
 });
 
 // Update a product catalog item
-app.put("/api/products/:id", requireAdmin, (req, res) => {
+app.put(["/api/products/:id", "/products/:id"], requireAdmin, (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   const db = getDBState();
@@ -812,7 +825,7 @@ app.put("/api/products/:id", requireAdmin, (req, res) => {
 });
 
 // Delete a product catalog item
-app.delete("/api/products/:id", requireAdmin, (req, res) => {
+app.delete(["/api/products/:id", "/products/:id"], requireAdmin, (req, res) => {
   const { id } = req.params;
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
@@ -830,7 +843,7 @@ app.delete("/api/products/:id", requireAdmin, (req, res) => {
 });
 
 // Add a consultation service item
-app.post("/api/services", requireAdmin, (req, res) => {
+app.post(["/api/services", "/services"], requireAdmin, (req, res) => {
   const serviceData = req.body;
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
@@ -853,7 +866,7 @@ app.post("/api/services", requireAdmin, (req, res) => {
 });
 
 // Update a consultation service item
-app.put("/api/services/:id", requireAdmin, (req, res) => {
+app.put(["/api/services/:id", "/services/:id"], requireAdmin, (req, res) => {
   const { id } = req.params;
   const updateData = req.body;
   const db = getDBState();
@@ -876,7 +889,7 @@ app.put("/api/services/:id", requireAdmin, (req, res) => {
 });
 
 // Delete a consultation service item
-app.delete("/api/services/:id", requireAdmin, (req, res) => {
+app.delete(["/api/services/:id", "/services/:id"], requireAdmin, (req, res) => {
   const { id } = req.params;
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
@@ -894,14 +907,14 @@ app.delete("/api/services/:id", requireAdmin, (req, res) => {
 });
 
 // Admin list all contact forms
-app.get("/api/messages", requireAdmin, (req, res) => {
+app.get(["/api/messages", "/messages"], requireAdmin, (req, res) => {
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
   res.json(db.messages || []);
 });
 
 // Toggle message read status
-app.put("/api/messages/:id/read", requireAdmin, (req, res) => {
+app.put(["/api/messages/:id/read", "/messages/:id/read"], requireAdmin, (req, res) => {
   const { id } = req.params;
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
@@ -918,7 +931,7 @@ app.put("/api/messages/:id/read", requireAdmin, (req, res) => {
 });
 
 // Admin delete contact message
-app.delete("/api/messages/:id", requireAdmin, (req, res) => {
+app.delete(["/api/messages/:id", "/messages/:id"], requireAdmin, (req, res) => {
   const { id } = req.params;
   const db = getDBState();
   if (!db) return res.status(500).json({ error: "Database state inaccessible." });
@@ -931,7 +944,7 @@ app.delete("/api/messages/:id", requireAdmin, (req, res) => {
 });
 
 // Biotech Agro AI Copywriter Assistant powered by Gemini 3.5 Flash
-app.post("/api/assistant", requireAdmin, async (req, res) => {
+app.post(["/api/assistant", "/assistant"], requireAdmin, async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) {
     return res.status(400).json({ error: "Prompt copy instruction is missing." });
@@ -993,6 +1006,19 @@ Fulfill their request in a highly academic yet commercially appealing and access
   console.error("Gemini API Error in /api/assistant:", lastError);
   res.status(503).json({ 
     error: lastError?.message || "Failed to generate copy using Gemini. The model is currently experiencing high demand. Please try again in a few seconds." 
+  });
+});
+
+
+// API_ROUTE_NOT_FOUND_DIAGNOSTIC
+app.use((req, res) => {
+  res.status(404).json({
+    ok: false,
+    error: "API route not found in BiotechAgro Vercel function.",
+    method: req.method,
+    path: req.path,
+    originalUrl: req.originalUrl,
+    hint: "If this is an auth action, use POST, not browser address-bar GET. Supported auth POST routes: /api/auth/login, /api/auth/request-reset, /api/auth/reset-password."
   });
 });
 
