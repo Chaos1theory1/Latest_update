@@ -18,7 +18,7 @@ const safeDirname = safeFilename
   : (typeof __dirname !== "undefined" ? __dirname : process.cwd());
 
 const app = express();
-const PORT = 3000;
+const const PORT = parseInt(process.env.PORT || "3000", 10);
 
 // Middleware to parse huge JSON bodies (for user base64 photo uploads up to 20MB)
 app.use(express.json({ limit: "20mb" }));
