@@ -6,7 +6,7 @@ import fs from "fs";
 import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 import nodemailer from "nodemailer";
-import defaultDbSeed from "./seed-db";
+import defaultDbSeed from "./seed-db.js";
 
 const app = express();
 // Middleware to parse huge JSON bodies (for user base64 photo uploads up to 20MB)
